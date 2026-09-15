@@ -1,7 +1,13 @@
 import { GoogleGenAI, Type } from "@google/genai";
 
+// gemini-3.1-pro-preview is paid-tier only (0 quota on the free tier), so it
+// isn't a useful fallback for a free API key — kept last in case billing is
+// ever enabled, but gemini-3.6-flash is retried first since transient
+// "high demand" (503) errors there are usually short-lived.
 const TEXT_MODELS = ["gemini-3.6-flash", "gemini-3.1-pro-preview"];
 const IMAGE_MODEL = "imagen-4.0-generate-001";
+const MAX_ATTEMPTS_PER_MODEL = 3;
+const RETRY_DELAYS_MS = [8000, 16000];
 
 // LinkedIn hard-caps a post's "commentary" at 3000 characters. We stay well
 // under that so hashtags never push the text over the limit and get
@@ -35,6 +41,39 @@ Rules:
 Return strictly valid JSON matching the schema.`;
 }
 
+function isRetryableError(message) {
+  return (
+    message.includes('"code":429') ||
+    message.includes('"code":503') ||
+    message.includes("UNAVAILABLE") ||
+    message.includes("RESOURCE_EXHAUSTED")
+  );
+}
+
+async function generateWithRetries(ai, model, prompt, schema) {
+  let lastErr;
+  for (let attempt = 1; attempt <= MAX_ATTEMPTS_PER_MODEL; attempt++) {
+    try {
+      const response = await ai.models.generateContent({
+        model,
+        contents: prompt,
+        config: { responseMimeType: "application/json", responseSchema: schema },
+      });
+      if (!response.text) throw new Error("Empty response from model");
+      return response.text;
+    } catch (err) {
+      lastErr = err;
+      const message = err.message || "";
+      const canRetry = isRetryableError(message) && attempt < MAX_ATTEMPTS_PER_MODEL;
+      if (!canRetry) throw lastErr;
+      const waitMs = RETRY_DELAYS_MS[attempt - 1] || 16000;
+      console.warn(`[gemini] ${model} attempt ${attempt} failed (${message.slice(0, 140)}), retrying in ${waitMs / 1000}s...`);
+      await new Promise((resolve) => setTimeout(resolve, waitMs));
+    }
+  }
+  throw lastErr;
+}
+
 export async function generatePostText(topics) {
   const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
   const prompt = buildPrompt(topics);
@@ -53,16 +92,8 @@ export async function generatePostText(topics) {
   let lastErr;
   for (const model of TEXT_MODELS) {
     try {
-      const response = await ai.models.generateContent({
-        model,
-        contents: prompt,
-        config: {
-          responseMimeType: "application/json",
-          responseSchema: schema,
-        },
-      });
-      if (!response.text) continue;
-      const parsed = JSON.parse(response.text);
+      const text = await generateWithRetries(ai, model, prompt, schema);
+      const parsed = JSON.parse(text);
       let content = String(parsed.content || "").trim();
       if (content.length > MAX_POST_CHARS) {
         content = content.slice(0, MAX_POST_CHARS - 1).trim() + "…";
@@ -77,7 +108,7 @@ export async function generatePostText(topics) {
       };
     } catch (err) {
       lastErr = err;
-      console.warn(`[gemini] Model ${model} failed (${err.message}), trying next...`);
+      console.warn(`[gemini] Model ${model} failed after retries (${err.message.slice(0, 140)}), trying next...`);
     }
   }
   throw new Error(`All text models failed to generate a post: ${lastErr?.message}`);
