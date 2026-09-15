@@ -39,6 +39,7 @@ async function main() {
   const post = await generatePostText(topics);
   const fullText = `${post.content}\n\n${post.hashtags.join(" ")}`;
   console.log(`      -> "${post.title}" (${fullText.length} chars, model: ${post.modelUsed})`);
+  console.log(`      -> hashtags: ${post.hashtags.join(" ")}`);
 
   console.log("[3/5] Generating post image with Gemini...");
   const image = await generatePostImage(post.imagePrompt);

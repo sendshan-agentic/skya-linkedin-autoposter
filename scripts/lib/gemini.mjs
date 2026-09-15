@@ -102,7 +102,10 @@ export async function generatePostText(topics) {
       return {
         title: parsed.title || "SKYA daily post",
         content,
-        hashtags: Array.isArray(parsed.hashtags) ? parsed.hashtags : ["#Skya", "#AIVisibilityIntelligence"],
+        hashtags:
+          Array.isArray(parsed.hashtags) && parsed.hashtags.length > 0
+            ? parsed.hashtags
+            : ["#Skya", "#AIVisibilityIntelligence", "#B2BMarketing", "#MarketingStrategy"],
         imagePrompt: parsed.imagePrompt || "Abstract glowing network signal, dark modern SaaS aesthetic, no text",
         modelUsed: model,
       };
