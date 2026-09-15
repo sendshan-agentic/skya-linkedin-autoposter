@@ -1,6 +1,6 @@
 import { GoogleGenAI, Type } from "@google/genai";
 
-const TEXT_MODELS = ["gemini-2.5-flash", "gemini-2.5-pro"];
+const TEXT_MODELS = ["gemini-3.6-flash", "gemini-3.1-pro-preview"];
 const IMAGE_MODEL = "imagen-4.0-generate-001";
 
 // LinkedIn hard-caps a post's "commentary" at 3000 characters. We stay well
