@@ -7,16 +7,63 @@
 // refresh token (see scripts/get-linkedin-token.mjs), this client will try
 // to refresh automatically and print the new token so you can update the
 // GitHub secret before the old one expires.
+//
+// LinkedIn also retires API versions roughly a year after release, so a
+// hardcoded version string eventually breaks. Instead of hardcoding one, we
+// try a list of recent YYYYMM versions (computed from today's real date
+// each time this runs) until one is accepted, and remember the winner for
+// the rest of the run.
 
-const LINKEDIN_VERSION = "202409"; // bump periodically per LinkedIn's versioning docs
 const API_BASE = "https://api.linkedin.com";
+let cachedWorkingVersion = null;
 
-function authHeaders(accessToken) {
+function candidateVersions() {
+  const versions = [];
+  const now = new Date();
+  for (let i = 0; i < 15; i++) {
+    const d = new Date(now.getFullYear(), now.getMonth() - i, 1);
+    versions.push(`${d.getFullYear()}${String(d.getMonth() + 1).padStart(2, "0")}`);
+  }
+  return versions;
+}
+
+function authHeaders(accessToken, version) {
   return {
     Authorization: `Bearer ${accessToken}`,
-    "LinkedIn-Version": LINKEDIN_VERSION,
+    "LinkedIn-Version": version,
     "X-Restli-Protocol-Version": "2.0.0",
   };
+}
+
+function looksLikeVersionError(status, bodyText) {
+  return status === 426 || (bodyText && bodyText.includes("NONEXISTENT_VERSION"));
+}
+
+// Calls buildRequest(version) => Promise<Response> repeatedly with different
+// LinkedIn-Version values until one is accepted (not a version-related
+// error), then remembers that version for the rest of this run.
+async function withVersionFallback(buildRequest) {
+  const versionsToTry = cachedWorkingVersion
+    ? [cachedWorkingVersion, ...candidateVersions()]
+    : candidateVersions();
+
+  let lastRes = null;
+  for (const version of versionsToTry) {
+    const res = await buildRequest(version);
+    if (res.ok || res.status === 201) {
+      if (version !== cachedWorkingVersion) {
+        console.log(`[linkedin] Using API version ${version}`);
+      }
+      cachedWorkingVersion = version;
+      return res;
+    }
+    const text = await res.clone().text().catch(() => "");
+    if (!looksLikeVersionError(res.status, text)) {
+      return res; // a real error (auth, payload, etc.) — no point trying other versions
+    }
+    lastRes = res;
+  }
+  return lastRes;
 }
 
 export async function maybeRefreshToken({ accessToken, refreshToken, clientId, clientSecret }) {
@@ -72,11 +119,13 @@ export async function resolvePersonUrn(accessToken) {
 // failure so the caller can fall back to a text-only post.
 export async function uploadImage(accessToken, authorUrn, imageBytes) {
   try {
-    const initRes = await fetch(`${API_BASE}/rest/images?action=initializeUpload`, {
-      method: "POST",
-      headers: { ...authHeaders(accessToken), "Content-Type": "application/json" },
-      body: JSON.stringify({ initializeUploadRequest: { owner: authorUrn } }),
-    });
+    const initRes = await withVersionFallback((version) =>
+      fetch(`${API_BASE}/rest/images?action=initializeUpload`, {
+        method: "POST",
+        headers: { ...authHeaders(accessToken, version), "Content-Type": "application/json" },
+        body: JSON.stringify({ initializeUploadRequest: { owner: authorUrn } }),
+      })
+    );
     if (!initRes.ok) {
       console.warn(`[linkedin] Image init failed (${initRes.status}): ${await initRes.text()}`);
       return null;
@@ -124,11 +173,13 @@ export async function publishPost(accessToken, authorUrn, commentary, imageUrn) 
     body.content = { media: { id: imageUrn } };
   }
 
-  const res = await fetch(`${API_BASE}/rest/posts`, {
-    method: "POST",
-    headers: { ...authHeaders(accessToken), "Content-Type": "application/json" },
-    body: JSON.stringify(body),
-  });
+  const res = await withVersionFallback((version) =>
+    fetch(`${API_BASE}/rest/posts`, {
+      method: "POST",
+      headers: { ...authHeaders(accessToken, version), "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+    })
+  );
 
   if (!res.ok) {
     const errText = await res.text();
