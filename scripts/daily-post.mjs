@@ -59,7 +59,7 @@ async function main() {
   let imageUrn = null;
   if (image) {
     console.log("      Uploading image to LinkedIn...");
-    imageUrn = await uploadImage(accessToken, authorUrn, image.bytes);
+    imageUrn = await uploadImage(accessToken, authorUrn, image.bytes, image.mimeType);
     console.log(imageUrn ? `      -> uploaded (${imageUrn})` : "      -> upload failed, continuing text-only");
   }
 

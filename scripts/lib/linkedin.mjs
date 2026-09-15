@@ -117,7 +117,7 @@ export async function resolvePersonUrn(accessToken) {
 // Registers an upload slot, PUTs the image bytes, and returns the
 // urn:li:image:... asset id to attach to a post. Returns null on any
 // failure so the caller can fall back to a text-only post.
-export async function uploadImage(accessToken, authorUrn, imageBytes) {
+export async function uploadImage(accessToken, authorUrn, imageBytes, mimeType = "image/png") {
   try {
     const initRes = await withVersionFallback((version) =>
       fetch(`${API_BASE}/rest/images?action=initializeUpload`, {
@@ -140,7 +140,7 @@ export async function uploadImage(accessToken, authorUrn, imageBytes) {
 
     const putRes = await fetch(uploadUrl, {
       method: "PUT",
-      headers: { "Content-Type": "image/png" },
+      headers: { "Content-Type": mimeType },
       body: imageBytes,
     });
     if (!putRes.ok && putRes.status !== 201) {

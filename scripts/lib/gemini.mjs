@@ -5,7 +5,11 @@ import { GoogleGenAI, Type } from "@google/genai";
 // ever enabled, but gemini-3.6-flash is retried first since transient
 // "high demand" (503) errors there are usually short-lived.
 const TEXT_MODELS = ["gemini-3.6-flash", "gemini-3.1-pro-preview"];
-const IMAGE_MODEL = "imagen-4.0-generate-001";
+// Gemini's image generation now happens through the regular generateContent
+// call (the model returns an inline image part), not the older
+// generateImages/Imagen "predict" API. Confirmed by listing this account's
+// actual models — see scripts/list-image-models.mjs.
+const IMAGE_MODELS = ["gemini-2.5-flash-image", "gemini-3.1-flash-image"];
 const MAX_ATTEMPTS_PER_MODEL = 3;
 const RETRY_DELAYS_MS = [8000, 16000];
 
@@ -119,20 +123,28 @@ export async function generatePostText(topics) {
 
 // Returns { bytes: Buffer, mimeType: string } or null if generation fails —
 // callers should treat a null image as "publish text-only today", not a
-// fatal error.
+// fatal error. Tries each image-capable model in turn.
 export async function generatePostImage(imagePrompt) {
-  try {
-    const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
-    const response = await ai.models.generateImages({
-      model: IMAGE_MODEL,
-      prompt: imagePrompt,
-      config: { numberOfImages: 1, aspectRatio: "1:1" },
-    });
-    const img = response?.generatedImages?.[0]?.image;
-    if (!img?.imageBytes) return null;
-    return { bytes: Buffer.from(img.imageBytes, "base64"), mimeType: "image/png" };
-  } catch (err) {
-    console.warn(`[gemini] Image generation failed (${err.message}). Publishing without an image.`);
-    return null;
+  const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
+  for (const model of IMAGE_MODELS) {
+    try {
+      const response = await ai.models.generateContent({
+        model,
+        contents: imagePrompt,
+      });
+      const parts = response?.candidates?.[0]?.content?.parts || [];
+      const imagePart = parts.find((p) => p.inlineData?.data);
+      if (imagePart) {
+        return {
+          bytes: Buffer.from(imagePart.inlineData.data, "base64"),
+          mimeType: imagePart.inlineData.mimeType || "image/png",
+        };
+      }
+      console.warn(`[gemini] ${model} returned no image data, trying next...`);
+    } catch (err) {
+      console.warn(`[gemini] Image model ${model} failed (${err.message.slice(0, 140)}), trying next...`);
+    }
   }
+  console.warn("[gemini] All image models failed. Publishing without an image.");
+  return null;
 }
