@@ -1,5 +1,6 @@
 import { fetchTrendContext } from "./lib/trends.mjs";
 import { generatePostText, generatePostImage } from "./lib/gemini.mjs";
+import { loadRecentTitles, appendHistory } from "./lib/history.mjs";
 import {
   maybeRefreshToken,
   resolvePersonUrn,
@@ -35,15 +36,24 @@ async function main() {
   const { topics, source } = await fetchTrendContext();
   console.log(`      -> ${topics.length} topics (source: ${source})`);
 
+  const recentTitles = loadRecentTitles();
+  if (recentTitles.length) {
+    console.log(`      Avoiding ${recentTitles.length} recently-covered topic(s).`);
+  }
+
   console.log("[2/5] Generating post text with Gemini...");
-  const post = await generatePostText(topics);
+  const post = await generatePostText(topics, recentTitles);
   const fullText = `${post.content}\n\n${post.hashtags.join(" ")}`;
   console.log(`      -> "${post.title}" (${fullText.length} chars, model: ${post.modelUsed})`);
   console.log(`      -> hashtags: ${post.hashtags.join(" ")}`);
 
   console.log("[3/5] Generating post image with Gemini...");
-  const image = await generatePostImage(post.imagePrompt);
-  console.log(image ? "      -> image generated" : "      -> no image (will publish text-only)");
+  const imagesEnabled = process.env.ENABLE_IMAGES === "true";
+  const image = imagesEnabled ? await generatePostImage(post.imagePrompt) : null;
+  if (!imagesEnabled) {
+    console.log("      -> images disabled (set ENABLE_IMAGES=true once billing is on to turn back on)");
+  }
+  console.log(image ? "      -> image generated" : imagesEnabled ? "      -> no image (will publish text-only)" : "");
 
   if (dryRun) {
     console.log("\n===== DRY RUN — nothing was published =====");
@@ -66,6 +76,9 @@ async function main() {
   console.log("[5/5] Publishing to LinkedIn...");
   const result = await publishPost(accessToken, authorUrn, fullText, imageUrn);
   console.log(`      -> published: ${result.postUrn || "(urn not returned)"}`);
+
+  appendHistory(post.title);
+  console.log("      -> saved this topic to history so it isn't repeated tomorrow");
 }
 
 main().catch((err) => {

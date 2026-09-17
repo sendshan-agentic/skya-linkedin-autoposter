@@ -18,16 +18,20 @@ const RETRY_DELAYS_MS = [8000, 16000];
 // silently truncated by the API.
 const MAX_POST_CHARS = 2600;
 
-function buildPrompt(topics) {
+function buildPrompt(topics, recentTitles = []) {
   const context = topics
     .slice(0, 5)
     .map((t, i) => `${i + 1}. [${t.category || "AI"}] ${t.title}: ${t.description}`)
     .join("\n");
 
+  const avoidance = recentTitles.length
+    ? `\n\nYou have already written about these angles in recent days — pick a DIFFERENT trending topic from the list above, or a clearly different angle if you must reuse one. Do not repeat them:\n${recentTitles.map((t) => `- ${t}`).join("\n")}\n`
+    : "";
+
   return `You are an elite LinkedIn ghostwriter for Skya.one (also called SKYA), the first AI Visibility Intelligence platform. It reveals what ChatGPT, Gemini, Perplexity, Claude, and Google AI Overviews say about a brand in real time, running specialized agents that flag hallucinations, competitor displacement, and missing schema, and produce client-ready reports.
 
 TODAY'S TRENDING AI CONTEXT (use ONE of these as the hook, pick the most relevant to marketing/brand visibility):
-${context}
+${context}${avoidance}
 
 Write ONE LinkedIn post following this 4-beat structure:
 1. World Changed: open with the trend as a hook, then note that buyers now ask ChatGPT/Perplexity/Gemini instead of Googling.
@@ -78,9 +82,9 @@ async function generateWithRetries(ai, model, prompt, schema) {
   throw lastErr;
 }
 
-export async function generatePostText(topics) {
+export async function generatePostText(topics, recentTitles = []) {
   const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
-  const prompt = buildPrompt(topics);
+  const prompt = buildPrompt(topics, recentTitles);
 
   const schema = {
     type: Type.OBJECT,
