@@ -1,4 +1,5 @@
 import { fetchTrendContext } from "./lib/trends.mjs";
+import { selectTopics } from "./lib/topic-selector.mjs";
 import { generatePostText, generatePostImage } from "./lib/gemini.mjs";
 import { loadRecentTitles, appendHistory } from "./lib/history.mjs";
 import {
@@ -33,13 +34,20 @@ async function main() {
   }
 
   console.log("[1/5] Fetching trend context...");
-  const { topics, source } = await fetchTrendContext();
-  console.log(`      -> ${topics.length} topics (source: ${source})`);
+  const { topics: liveTopics, source } = await fetchTrendContext();
+  console.log(`      -> ${liveTopics.length} live topics (source: ${source})`);
 
   const recentTitles = loadRecentTitles();
   if (recentTitles.length) {
     console.log(`      Avoiding ${recentTitles.length} recently-covered topic(s).`);
   }
+
+  // Mix live trends with a rotating pool of evergreen angles and drop
+  // anything too similar to recent posts — the live feed alone isn't a
+  // reliable source of day-to-day variety (it can return the same top
+  // story for days), so we don't depend on it exclusively.
+  const topics = selectTopics(liveTopics, recentTitles);
+  console.log(`      -> ${topics.length} candidate topics after dedup/shuffle`);
 
   console.log("[2/5] Generating post text with Gemini...");
   const post = await generatePostText(topics, recentTitles);
