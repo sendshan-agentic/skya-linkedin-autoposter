@@ -100,31 +100,41 @@ export async function generatePostText(topics, recentTitles = []) {
   };
 
   let lastErr;
-  for (const model of TEXT_MODELS) {
-    try {
-      const text = await generateWithRetries(ai, model, prompt, schema);
-      const parsed = JSON.parse(text);
-      let content = String(parsed.content || "").trim();
-      if (content.length > MAX_POST_CHARS) {
-        content = content.slice(0, MAX_POST_CHARS - 1).trim() + "…";
-        console.warn(`[gemini] Post exceeded ${MAX_POST_CHARS} chars, trimmed.`);
+  const TOTAL_PASSES = 2;
+  for (let pass = 1; pass <= TOTAL_PASSES; pass++) {
+    for (const model of TEXT_MODELS) {
+      try {
+        const text = await generateWithRetries(ai, model, prompt, schema);
+        const parsed = JSON.parse(text);
+        let content = String(parsed.content || "").trim();
+        if (content.length > MAX_POST_CHARS) {
+          content = content.slice(0, MAX_POST_CHARS - 1).trim() + "…";
+          console.warn(`[gemini] Post exceeded ${MAX_POST_CHARS} chars, trimmed.`);
+        }
+        return {
+          title: parsed.title || "SKYA daily post",
+          content,
+          hashtags:
+            Array.isArray(parsed.hashtags) && parsed.hashtags.length > 0
+              ? parsed.hashtags
+              : ["#Skya", "#AIVisibilityIntelligence", "#B2BMarketing", "#MarketingStrategy"],
+          imagePrompt: parsed.imagePrompt || "Abstract glowing network signal, dark modern SaaS aesthetic, no text",
+          modelUsed: model,
+        };
+      } catch (err) {
+        lastErr = err;
+        console.warn(`[gemini] Model ${model} failed after retries (${err.message.slice(0, 140)}), trying next...`);
       }
-      return {
-        title: parsed.title || "SKYA daily post",
-        content,
-        hashtags:
-          Array.isArray(parsed.hashtags) && parsed.hashtags.length > 0
-            ? parsed.hashtags
-            : ["#Skya", "#AIVisibilityIntelligence", "#B2BMarketing", "#MarketingStrategy"],
-        imagePrompt: parsed.imagePrompt || "Abstract glowing network signal, dark modern SaaS aesthetic, no text",
-        modelUsed: model,
-      };
-    } catch (err) {
-      lastErr = err;
-      console.warn(`[gemini] Model ${model} failed after retries (${err.message.slice(0, 140)}), trying next...`);
+    }
+    // Every model failed this pass. If Gemini is having a broad, temporary
+    // capacity spike (as opposed to one bad model), a longer cooldown and a
+    // second full pass over the same list often succeeds.
+    if (pass < TOTAL_PASSES) {
+      console.warn(`[gemini] All models failed on pass ${pass}, waiting 30s before a second full pass...`);
+      await new Promise((resolve) => setTimeout(resolve, 30000));
     }
   }
-  throw new Error(`All text models failed to generate a post: ${lastErr?.message}`);
+  throw new Error(`All text models failed across ${TOTAL_PASSES} passes: ${lastErr?.message}`);
 }
 
 // Returns { bytes: Buffer, mimeType: string } or null if generation fails —
