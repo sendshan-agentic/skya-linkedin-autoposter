@@ -2,18 +2,23 @@ import { GoogleGenAI, Type } from "@google/genai";
 
 // gemini-flash-latest is an alias Google keeps pointed at their current
 // recommended flash model, so it won't go stale the way a pinned version
-// like gemini-3.6-flash eventually will. gemini-2.5-flash-lite is a third
-// fallback on a separate capacity pool, useful specifically for "high
-// demand" 503s. gemini-3.1-pro-preview was removed — it's paid-tier only
-// (0 quota on the free tier), so retrying it was pure wasted time.
-const TEXT_MODELS = ["gemini-flash-latest", "gemini-3.6-flash", "gemini-2.5-flash-lite"];
-// Gemini's image generation now happens through the regular generateContent
+// eventually will. The other two are named fallbacks for when "latest" is
+// itself under high demand. gemini-3.1-pro-preview was deliberately left
+// out — it's paid-tier only (0 quota on the free tier), so retrying it is
+// pure wasted time on a free API key.
+const TEXT_MODELS = ["gemini-flash-latest", "gemini-3.6-flash", "gemini-3.5-flash-lite"];
+
+// Gemini's image generation happens through the regular generateContent
 // call (the model returns an inline image part), not the older
 // generateImages/Imagen "predict" API. Confirmed by listing this account's
-// actual models — see scripts/list-image-models.mjs.
+// actual models — see scripts/list-image-models.mjs. Only used when
+// ENABLE_IMAGES=true (off by default — needs billing enabled).
 const IMAGE_MODELS = ["gemini-2.5-flash-image", "gemini-3.1-flash-image"];
+
 const MAX_ATTEMPTS_PER_MODEL = 3;
 const RETRY_DELAYS_MS = [8000, 16000];
+const TOTAL_PASSES = 2;
+const BETWEEN_PASS_DELAY_MS = 30000;
 
 // LinkedIn hard-caps a post's "commentary" at 3000 characters. We stay well
 // under that so hashtags never push the text over the limit and get
@@ -60,6 +65,10 @@ function isRetryableError(message) {
   );
 }
 
+function sleep(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
 async function generateWithRetries(ai, model, prompt, schema) {
   let lastErr;
   for (let attempt = 1; attempt <= MAX_ATTEMPTS_PER_MODEL; attempt++) {
@@ -78,7 +87,7 @@ async function generateWithRetries(ai, model, prompt, schema) {
       if (!canRetry) throw lastErr;
       const waitMs = RETRY_DELAYS_MS[attempt - 1] || 16000;
       console.warn(`[gemini] ${model} attempt ${attempt} failed (${message.slice(0, 140)}), retrying in ${waitMs / 1000}s...`);
-      await new Promise((resolve) => setTimeout(resolve, waitMs));
+      await sleep(waitMs);
     }
   }
   throw lastErr;
@@ -100,7 +109,6 @@ export async function generatePostText(topics, recentTitles = []) {
   };
 
   let lastErr;
-  const TOTAL_PASSES = 2;
   for (let pass = 1; pass <= TOTAL_PASSES; pass++) {
     for (const model of TEXT_MODELS) {
       try {
@@ -126,12 +134,9 @@ export async function generatePostText(topics, recentTitles = []) {
         console.warn(`[gemini] Model ${model} failed after retries (${err.message.slice(0, 140)}), trying next...`);
       }
     }
-    // Every model failed this pass. If Gemini is having a broad, temporary
-    // capacity spike (as opposed to one bad model), a longer cooldown and a
-    // second full pass over the same list often succeeds.
     if (pass < TOTAL_PASSES) {
-      console.warn(`[gemini] All models failed on pass ${pass}, waiting 30s before a second full pass...`);
-      await new Promise((resolve) => setTimeout(resolve, 30000));
+      console.warn(`[gemini] All models failed on pass ${pass}, waiting ${BETWEEN_PASS_DELAY_MS / 1000}s before a second full pass...`);
+      await sleep(BETWEEN_PASS_DELAY_MS);
     }
   }
   throw new Error(`All text models failed across ${TOTAL_PASSES} passes: ${lastErr?.message}`);
