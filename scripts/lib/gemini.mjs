@@ -1,10 +1,12 @@
 import { GoogleGenAI, Type } from "@google/genai";
 
-// gemini-3.1-pro-preview is paid-tier only (0 quota on the free tier), so it
-// isn't a useful fallback for a free API key — kept last in case billing is
-// ever enabled, but gemini-3.6-flash is retried first since transient
-// "high demand" (503) errors there are usually short-lived.
-const TEXT_MODELS = ["gemini-3.6-flash", "gemini-3.1-pro-preview"];
+// gemini-flash-latest is an alias Google keeps pointed at their current
+// recommended flash model, so it won't go stale the way a pinned version
+// like gemini-3.6-flash eventually will. gemini-2.5-flash-lite is a third
+// fallback on a separate capacity pool, useful specifically for "high
+// demand" 503s. gemini-3.1-pro-preview was removed — it's paid-tier only
+// (0 quota on the free tier), so retrying it was pure wasted time.
+const TEXT_MODELS = ["gemini-flash-latest", "gemini-3.6-flash", "gemini-2.5-flash-lite"];
 // Gemini's image generation now happens through the regular generateContent
 // call (the model returns an inline image part), not the older
 // generateImages/Imagen "predict" API. Confirmed by listing this account's
