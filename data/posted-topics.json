@@ -1,9 +1,5 @@
 [
   {
-    "title": "The Press Release That Silently Kills Your Pipeline",
-    "date": "2026-10-01"
-  },
-  {
     "title": "Why Your SEO Tools Are Blind to What ChatGPT Is Saying",
     "date": "2026-10-02"
   },
@@ -118,5 +114,9 @@
   {
     "title": "The Citation Monopoly: When Google AI Overviews Decide the Winner Before the Click",
     "date": "2026-10-30"
+  },
+  {
+    "title": "The Deprecated Feature Trap: When AI Teaches Buyers Your Past",
+    "date": "2026-10-31"
   }
 ]
