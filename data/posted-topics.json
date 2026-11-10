@@ -1,9 +1,5 @@
 [
   {
-    "title": "The Synthetic Shortlist: How AI Cuts You From Enterprise Deals Before the First Demo",
-    "date": "2026-10-11"
-  },
-  {
     "title": "Why Answer Engines Are Quoting Your Past Against You",
     "date": "2026-10-12"
   },
@@ -118,5 +114,9 @@
   {
     "title": "The Architectural Vetting: How Frontier AI Evaluates Your Tech Stack",
     "date": "2026-11-09"
+  },
+  {
+    "title": "The Enterprise Fact-Mangle: When AI Blends Your Specs With Your Rival's Pricing",
+    "date": "2026-11-10"
   }
 ]
