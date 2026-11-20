@@ -1,31 +1,5 @@
 import { EVERGREEN_ANGLES } from "./angles.mjs";
-
-const STOPWORDS = new Set([
-  "the", "a", "an", "is", "are", "and", "or", "to", "of", "in", "on", "for",
-  "your", "you", "what", "how", "why", "just", "with", "at", "it", "its",
-  "that", "this", "be", "no", "not", "can", "now", "their", "than",
-]);
-
-function significantWords(title) {
-  return new Set(
-    title
-      .toLowerCase()
-      .replace(/[^a-z0-9\s]/g, " ")
-      .split(/\s+/)
-      .filter((w) => w.length > 3 && !STOPWORDS.has(w))
-  );
-}
-
-// Jaccard similarity of significant words — catches "same story, reworded
-// headline" even when no exact phrase matches.
-function similarity(a, b) {
-  const setA = significantWords(a);
-  const setB = significantWords(b);
-  if (setA.size === 0 || setB.size === 0) return 0;
-  let overlap = 0;
-  for (const word of setA) if (setB.has(word)) overlap++;
-  return overlap / Math.min(setA.size, setB.size);
-}
+import { isDuplicateOfHistory } from "./similarity.mjs";
 
 function shuffle(array) {
   const copy = [...array];
@@ -36,23 +10,25 @@ function shuffle(array) {
   return copy;
 }
 
-const SIMILARITY_THRESHOLD = 0.5;
+// Drops any candidate whose title/description matches a past post's title,
+// underlying story (hook) or opening paragraph, by wording OR by shared
+// names/version numbers (e.g. "Fable", "Mythos", "5.1").
+export function selectTopics(candidates, history, { includeEvergreen = true } = {}) {
+  const combined = includeEvergreen ? [...candidates, ...EVERGREEN_ANGLES] : [...candidates];
 
-// Combines live trends with the evergreen angle pool, filters out anything
-// too close to what was posted recently, shuffles so the same item doesn't
-// always land first (which the prompt tends to favor), and returns a short
-// candidate list for the prompt.
-export function selectTopics(liveTopics, recentTitles) {
-  const combined = [...liveTopics, ...EVERGREEN_ANGLES];
+  const fresh = combined.filter((t) => {
+    const dup = isDuplicateOfHistory(`${t.title}. ${t.description || ""}`, history);
+    if (dup) console.log(`      skip (already covered): "${t.title}"  ~ "${dup.hook || dup.title}"`);
+    return !dup;
+  });
 
-  const fresh = combined.filter(
-    (topic) => !recentTitles.some((recent) => similarity(topic.title, recent) >= SIMILARITY_THRESHOLD)
-  );
+  if (fresh.length === 0) {
+    console.warn("      every candidate overlaps recent posts; using evergreen angles only");
+    return shuffle(EVERGREEN_ANGLES).slice(0, 6);
+  }
 
-  // If literally everything overlaps with recent history (very unlikely,
-  // but possible with a small pool), fall back to the full combined list
-  // rather than producing no candidates at all.
-  const pool = fresh.length > 0 ? fresh : combined;
-
-  return shuffle(pool).slice(0, 6);
+  // Keep caller-supplied order priority (fresh news first), shuffle within groups.
+  const fromCandidates = fresh.filter((t) => candidates.includes(t));
+  const fromEvergreen = fresh.filter((t) => !candidates.includes(t));
+  return [...shuffle(fromCandidates), ...shuffle(fromEvergreen)].slice(0, 6);
 }

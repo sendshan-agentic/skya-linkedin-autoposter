@@ -33,33 +33,47 @@ const BETWEEN_PASS_DELAY_MS = 30000;
 // silently truncated by the API.
 const MAX_POST_CHARS = 2600;
 
-function buildPrompt(topics, recentTitles = []) {
+const HARD_CTA =
+  'Audit what major AI models say about your brand in real time at Skya.one (7-day free trial, no card required).';
+const SOFT_CTA = "A short, low-key line pointing to Skya.one (e.g. \"We track this at Skya.one.\"), no hard sell.";
+
+function buildPrompt(topics, history = [], pillar) {
   const context = topics
-    .slice(0, 5)
+    .slice(0, 6)
     .map((t, i) => `${i + 1}. [${t.category || "AI"}] ${t.title}: ${t.description}`)
     .join("\n");
 
-  const avoidance = recentTitles.length
-    ? `\n\nYou have already written about these angles in recent days — pick a DIFFERENT trending topic from the list above, or a clearly different angle if you must reuse one. Do not repeat them:\n${recentTitles.map((t) => `- ${t}`).join("\n")}\n`
+  const recent = history.slice(-15);
+  const avoidance = recent.length
+    ? `\n\nALREADY POSTED (do NOT reuse these stories, products, model names, hooks or opening lines, even reworded):\n${recent
+        .map((h) => `- ${h.hook || h.title}${h.opening ? ` | opened with: "${h.opening.slice(0, 140)}"` : ""}`)
+        .join("\n")}\n`
     : "";
 
-  return `You are an elite LinkedIn ghostwriter for Skya.one (also called SKYA), the first AI Visibility Intelligence platform. It reveals what ChatGPT, Gemini, Perplexity, Claude, and Google AI Overviews say about a brand in real time, running specialized agents that flag hallucinations, competitor displacement, and missing schema, and produce client-ready reports.
+  const ctaRule = pillar?.softCta
+    ? `End with ${SOFT_CTA}`
+    : `End with a sharp question, then this exact CTA: "${HARD_CTA}"`;
 
-TODAY'S TRENDING AI CONTEXT (use ONE of these as the hook, pick the most relevant to marketing/brand visibility):
+  return `You are an elite LinkedIn ghostwriter for Santanu Raychaudhuri, founder of Skya.one (SKYA), the first AI Visibility Intelligence platform. It reveals what ChatGPT, Gemini, Perplexity, Claude, and Google AI Overviews say about a brand in real time, flagging hallucinations, competitor displacement, and missing schema.
+
+Today's post type: ${pillar ? pillar.label.toUpperCase() : "AI VISIBILITY"}
+
+CANDIDATE STORIES (pick exactly ONE as the core of the post):
 ${context}${avoidance}
 
-Write ONE LinkedIn post following this 4-beat structure:
-1. World Changed: open with the trend as a hook, then note that buyers now ask ChatGPT/Perplexity/Gemini instead of Googling.
-2. Problem Created: brands/agencies have zero visibility into what AI says about them right now — wrong pricing, outdated features, or a competitor being recommended instead.
-3. Solution: introduce Skya.one naturally, lead with a concrete-sounding finding, not a feature list.
-4. Close: a sharp question, then this exact CTA: "Audit what major AI models say about your brand in real time at Skya.one (7-day free trial, no card required)."
+How to write it:
+${pillar ? pillar.instructions : ""}
 
 Rules:
+- Open with a fresh first line that does NOT start with "X just released/launched". Vary the hook style: a stat, a contrarian claim, a question, a short scene, or a prediction.
+- Use only facts given in the candidate story. Never invent numbers, quotes or events.
 - Never say "AEO tool", "visibility tracker", or "made in India".
-- Short, confident sentences. Real specifics beat abstractions.
-- Total length of "content" (including hashtags) MUST be under ${MAX_POST_CHARS} characters.
-- 5-6 relevant hashtags, always including #Skya and #AIVisibilityIntelligence.
-- Also write "imagePrompt": a description for a clean, professional, abstract tech/business illustration (NOT a screenshot, NOT text-in-image, NOT any real person or logo) that visually fits the post's theme — e.g. glowing network nodes, a brand signal being picked up on a radar, etc. Square composition, dark modern SaaS aesthetic, no readable text.
+- Short, confident sentences, one idea per line. Real specifics beat abstractions.
+- ${ctaRule}
+- Total length of "content" MUST be under ${MAX_POST_CHARS} characters.
+- 5-6 relevant hashtags, always including #Skya; add #AIVisibilityIntelligence only on AI-visibility posts.
+- "sourceTopic": copy the exact title of the candidate story you chose.
+- "imagePrompt": a clean, abstract tech/business illustration fitting the theme (no text, no real people or logos), square, dark modern SaaS aesthetic.
 
 Return strictly valid JSON matching the schema.`;
 }
@@ -103,9 +117,9 @@ async function generateWithRetries(ai, model, prompt, schema) {
   throw lastErr;
 }
 
-export async function generatePostText(topics, recentTitles = []) {
+export async function generatePostText(topics, history = [], pillar = null) {
   const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
-  const prompt = buildPrompt(topics, recentTitles);
+  const prompt = buildPrompt(topics, history, pillar);
 
   const schema = {
     type: Type.OBJECT,
@@ -114,8 +128,9 @@ export async function generatePostText(topics, recentTitles = []) {
       content: { type: Type.STRING },
       hashtags: { type: Type.ARRAY, items: { type: Type.STRING } },
       imagePrompt: { type: Type.STRING },
+      sourceTopic: { type: Type.STRING },
     },
-    required: ["title", "content", "hashtags", "imagePrompt"],
+    required: ["title", "content", "hashtags", "imagePrompt", "sourceTopic"],
   };
 
   let lastErr;
@@ -137,6 +152,7 @@ export async function generatePostText(topics, recentTitles = []) {
               ? parsed.hashtags
               : ["#Skya", "#AIVisibilityIntelligence", "#B2BMarketing", "#MarketingStrategy"],
           imagePrompt: parsed.imagePrompt || "Abstract glowing network signal, dark modern SaaS aesthetic, no text",
+          sourceTopic: parsed.sourceTopic || "",
           modelUsed: model,
         };
       } catch (err) {
