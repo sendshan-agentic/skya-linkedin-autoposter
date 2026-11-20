@@ -36,7 +36,7 @@ async function main() {
     accessToken = refreshed.accessToken;
   }
 
-  const history = loadHistory();
+  let history = loadHistory();
   const pillar = pickPillar(history);
   console.log(`[1/5] Post type: ${pillar.label}. Gathering stories...`);
 
@@ -69,8 +69,17 @@ async function main() {
       break;
     }
     console.warn(`      draft ${attempt} repeats a past post ("${dup.hook || dup.title}"), regenerating with that story removed...`);
-    pool = pool.filter((t) => t.title !== draft.sourceTopic && similarity(t.title, draft.sourceTopic) < 0.6);
-    if (pool.length === 0) break;
+    // Remove only the single story the draft was built on (closest match),
+    // then keep going. Refill from evergreen angles if the list runs dry.
+    let worstIdx = -1;
+    let worstScore = 0;
+    pool.forEach((t, i) => {
+      const score = t.title === draft.sourceTopic ? 2 : similarity(t.title, draft.sourceTopic);
+      if (score > worstScore) { worstScore = score; worstIdx = i; }
+    });
+    if (worstIdx >= 0) pool = pool.filter((_, i) => i !== worstIdx);
+    history = [...history, { title: draft.title, hook: draft.sourceTopic, opening }];
+    if (pool.length < 2) pool = [...pool, ...selectTopics([], history, { includeEvergreen: true })];
   }
   if (!post) {
     throw new Error("Could not produce a post that differs from recent ones; skipping today rather than posting a repeat.");
