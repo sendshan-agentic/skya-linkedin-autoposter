@@ -1,7 +1,10 @@
 import { fetchTrendContext } from "./lib/trends.mjs";
 import { selectTopics } from "./lib/topic-selector.mjs";
 import { generatePostText, generatePostImage } from "./lib/gemini.mjs";
-import { loadRecentTitles, appendHistory } from "./lib/history.mjs";
+import { loadHistory, appendHistory } from "./lib/history.mjs";
+import { pickPillar } from "./lib/pillars.mjs";
+import { fetchFreshHeadlines } from "./lib/news.mjs";
+import { isDuplicateOfHistory, similarity, sharedEntities } from "./lib/similarity.mjs";
 import {
   maybeRefreshToken,
   resolvePersonUrn,
@@ -33,26 +36,49 @@ async function main() {
     accessToken = refreshed.accessToken;
   }
 
-  console.log("[1/5] Fetching trend context...");
-  const { topics: liveTopics, source } = await fetchTrendContext();
-  console.log(`      -> ${liveTopics.length} live topics (source: ${source})`);
+  const history = loadHistory();
+  const pillar = pickPillar(history);
+  console.log(`[1/5] Post type: ${pillar.label}. Gathering stories...`);
 
-  const recentTitles = loadRecentTitles();
-  if (recentTitles.length) {
-    console.log(`      Avoiding ${recentTitles.length} recently-covered topic(s).`);
+  let candidates = [];
+  if (pillar.searchBrief) {
+    const avoid = history.slice(-15).map((h) => h.hook || h.title);
+    candidates = await fetchFreshHeadlines(pillar, avoid);
+    console.log(`      -> ${candidates.length} fresh headlines via Google Search`);
+  }
+  if (candidates.length === 0) {
+    const { topics: liveTopics, source } = await fetchTrendContext();
+    console.log(`      -> ${liveTopics.length} live trend topics (source: ${source})`);
+    candidates = liveTopics;
   }
 
-  // Mix live trends with a rotating pool of evergreen angles and drop
-  // anything too similar to recent posts — the live feed alone isn't a
-  // reliable source of day-to-day variety (it can return the same top
-  // story for days), so we don't depend on it exclusively.
-  const topics = selectTopics(liveTopics, recentTitles);
-  console.log(`      -> ${topics.length} candidate topics after dedup/shuffle`);
+  const topics = selectTopics(candidates, history, { includeEvergreen: !pillar.searchBrief });
+  console.log(`      -> ${topics.length} candidate topics after removing anything already covered`);
 
   console.log("[2/5] Generating post text with Gemini...");
-  const post = await generatePostText(topics, recentTitles);
+  let post = null;
+  let pool = topics;
+  for (let attempt = 1; attempt <= 3; attempt++) {
+    const draft = await generatePostText(pool, history, pillar);
+    const opening = draft.content.slice(0, 300);
+    const dup =
+      isDuplicateOfHistory(draft.sourceTopic, history) ||
+      history.find((h) => h.opening && (similarity(opening, h.opening) >= 0.45 || sharedEntities(opening, h.opening) >= 3));
+    if (!dup) {
+      post = draft;
+      break;
+    }
+    console.warn(`      draft ${attempt} repeats a past post ("${dup.hook || dup.title}"), regenerating with that story removed...`);
+    pool = pool.filter((t) => t.title !== draft.sourceTopic && similarity(t.title, draft.sourceTopic) < 0.6);
+    if (pool.length === 0) break;
+  }
+  if (!post) {
+    throw new Error("Could not produce a post that differs from recent ones; skipping today rather than posting a repeat.");
+  }
+
   const fullText = `${post.content}\n\n${post.hashtags.join(" ")}`;
   console.log(`      -> "${post.title}" (${fullText.length} chars, model: ${post.modelUsed})`);
+  console.log(`      -> story: ${post.sourceTopic}`);
   console.log(`      -> hashtags: ${post.hashtags.join(" ")}`);
 
   console.log("[3/5] Generating post image with Gemini...");
@@ -65,6 +91,7 @@ async function main() {
 
   if (dryRun) {
     console.log("\n===== DRY RUN — nothing was published =====");
+    console.log(`[pillar: ${pillar.id}]`);
     console.log(fullText);
     console.log(`Image generated: ${Boolean(image)}`);
     return;
@@ -85,8 +112,13 @@ async function main() {
   const result = await publishPost(accessToken, authorUrn, fullText, imageUrn);
   console.log(`      -> published: ${result.postUrn || "(urn not returned)"}`);
 
-  appendHistory(post.title);
-  console.log("      -> saved this topic to history so it isn't repeated tomorrow");
+  appendHistory({
+    title: post.title,
+    hook: post.sourceTopic,
+    opening: post.content.slice(0, 300),
+    pillar: pillar.id,
+  });
+  console.log("      -> saved this topic to history so it isn't repeated in the next post");
 }
 
 main().catch((err) => {
