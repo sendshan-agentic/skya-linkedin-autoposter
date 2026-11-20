@@ -6,7 +6,15 @@ import { GoogleGenAI, Type } from "@google/genai";
 // itself under high demand. gemini-3.1-pro-preview was deliberately left
 // out — it's paid-tier only (0 quota on the free tier), so retrying it is
 // pure wasted time on a free API key.
-const TEXT_MODELS = ["gemini-flash-latest", "gemini-3.6-flash", "gemini-3.5-flash-lite"];
+// Each model has its own free-tier quota, so a longer list of fallbacks means
+// one exhausted/overloaded model no longer kills the whole run.
+const TEXT_MODELS = [
+  "gemini-flash-latest",
+  "gemini-flash-lite-latest",
+  "gemini-2.5-flash",
+  "gemini-2.5-flash-lite",
+  "gemini-2.0-flash",
+];
 
 // Gemini's image generation happens through the regular generateContent
 // call (the model returns an inline image part), not the older
@@ -83,7 +91,9 @@ async function generateWithRetries(ai, model, prompt, schema) {
     } catch (err) {
       lastErr = err;
       const message = err.message || "";
-      const canRetry = isRetryableError(message) && attempt < MAX_ATTEMPTS_PER_MODEL;
+      // A daily-quota 429 won't clear in 16 seconds — skip straight to the next model.
+      const dailyQuota = /PerDay|per day|daily/i.test(message);
+      const canRetry = isRetryableError(message) && !dailyQuota && attempt < MAX_ATTEMPTS_PER_MODEL;
       if (!canRetry) throw lastErr;
       const waitMs = RETRY_DELAYS_MS[attempt - 1] || 16000;
       console.warn(`[gemini] ${model} attempt ${attempt} failed (${message.slice(0, 140)}), retrying in ${waitMs / 1000}s...`);
@@ -131,7 +141,7 @@ export async function generatePostText(topics, recentTitles = []) {
         };
       } catch (err) {
         lastErr = err;
-        console.warn(`[gemini] Model ${model} failed after retries (${err.message.slice(0, 140)}), trying next...`);
+        console.warn(`[gemini] Model ${model} failed (${(err.message || "").slice(0, 300)}), trying next...`);
       }
     }
     if (pass < TOTAL_PASSES) {
