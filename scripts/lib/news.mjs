@@ -3,8 +3,7 @@
 // real stories from this week instead of the model's stale memory.
 // Returns [] on any failure; the caller then falls back to the live trend feed.
 import { GoogleGenAI } from "@google/genai";
-
-const SEARCH_MODELS = ["gemini-flash-latest", "gemini-2.5-flash", "gemini-flash-lite-latest"];
+import { getTextModels } from "./models.mjs";
 
 function extractJsonArray(text) {
   const start = text.indexOf("[");
@@ -30,7 +29,7 @@ Only stories published in the last 7 days. Each must be a different story, not v
 Return ONLY a JSON array, no prose, of objects:
 [{"title": "<factual headline>", "description": "<2-3 sentences: what happened, key names and numbers, why it matters>", "source": "<publication name>", "date": "<YYYY-MM-DD>"}]`;
 
-  for (const model of SEARCH_MODELS) {
+  for (const model of await getTextModels()) {
     try {
       const res = await ai.models.generateContent({
         model,

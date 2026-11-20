@@ -6,15 +6,7 @@ import { GoogleGenAI, Type } from "@google/genai";
 // itself under high demand. gemini-3.1-pro-preview was deliberately left
 // out — it's paid-tier only (0 quota on the free tier), so retrying it is
 // pure wasted time on a free API key.
-// Each model has its own free-tier quota, so a longer list of fallbacks means
-// one exhausted/overloaded model no longer kills the whole run.
-const TEXT_MODELS = [
-  "gemini-flash-latest",
-  "gemini-flash-lite-latest",
-  "gemini-2.5-flash",
-  "gemini-2.5-flash-lite",
-  "gemini-2.0-flash",
-];
+import { getTextModels } from "./models.mjs";
 
 // Gemini's image generation happens through the regular generateContent
 // call (the model returns an inline image part), not the older
@@ -135,7 +127,7 @@ export async function generatePostText(topics, history = [], pillar = null) {
 
   let lastErr;
   for (let pass = 1; pass <= TOTAL_PASSES; pass++) {
-    for (const model of TEXT_MODELS) {
+    for (const model of await getTextModels()) {
       try {
         const text = await generateWithRetries(ai, model, prompt, schema);
         const parsed = JSON.parse(text);
