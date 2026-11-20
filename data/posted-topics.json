@@ -118,5 +118,12 @@
   {
     "title": "The Ghost RFP: When Frontier AI Disqualifies You Before the First Call",
     "date": "2026-11-20"
+  },
+  {
+    "title": "2 Million Tokens and the Death of the Skimmed RFP",
+    "hook": "OpenAI Astra Pro — Extended Context",
+    "opening": "A 2-million-token context window isn't just a technical benchmark.\n\nIt is the end of high-level brand summaries.\n\nOpenAI introduced Astra Pro with a 2M token context window, alongside upgraded tool-use capabilities, multi-step reasoning, and code generation.\n\nTo put 2 million tokens into perspective",
+    "pillar": "news",
+    "date": "2026-11-20"
   }
 ]
